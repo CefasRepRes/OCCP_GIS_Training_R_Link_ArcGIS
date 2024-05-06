@@ -1,0 +1,265 @@
+---
+title: "Using R with ArcGIS"
+author: "Richard Heal"
+date: "07 05 2024"
+format: html
+editor: visual
+---
+
+# Using R with ArcGIS
+
+## 0. Introduction
+
+In this document you are going to explore how to use R with ArcGIS software, including ArcGIS Pro.
+
+The aim is to provide an insight into how it is possible to obtain spatial data from ArcGIS software in an R environment. It is not intended as a training resource for using spatial data in R nor is it intended to show how spatial data can be uploaded to ArcGIS from R data sources.
+
+The article will cover the following points:
+
+1.  The main packages required and what they do
+
+2.  Getting the information needed from the ESRI Living Atlas (or other portal) to link to R
+
+3.  Example code to obtain spatial data from ESRI Living Atlas
+
+This document can be found in the Github repository [OCCP_GIS_Training_R\_Link_ArcGIS](https://github.com/CefasRepRes/OCCP_GIS_Training_R_Link_ArcGIS.git).
+
+## 1. Packages needed
+
+@tbl-packages-required shows the R packages required to run the code in this document.
+
+The main package used to link ArcGIS to R is called 'arcgis' and more information can be found [here](https://www.esri.com/arcgis-blog/products/developers/announcements/announcing-arcgis-r-package/ "Hyperlink to ArcGIS package").
+
+When obtaining spatial data via this link the package returns an **sf** object and therefore this package is needed.
+
+```{r}
+#| label: load packages
+#| message: false
+#| echo: false
+#| warning: false
+#| 
+if (!require('arcgis')){
+  install.packages('arcgis')
+}
+library(arcgis)
+library(tidyverse)
+library(sf)
+library(kableExtra)
+library(leaflet)
+
+```
+
+```{r}
+#| label: tbl-packages-required
+#| tbl-cap: |
+#|  Packages required to run this document.
+#| echo: false
+
+kbl(data.frame(
+  Package = c("arcgis", "tidyverse", "sf", "kableExtra", "leaflet"),
+  Comment = c("Package to link to ArcGIS Software",
+              "Package to allow easy data manipulation in R",
+              "Package to allow spatial data operations in R",
+              "Package to create nice HTML tables for output in R",
+              "Package to enable interactive plotting of spatial data on a map")
+), col.names = c("Package", "Comment")) %>%
+  kable_material()
+
+```
+
+## 2. Finding the information needed to get the spatial data into R
+
+### 2.1. Overview
+
+In this demonstration we are showing you how to get data from an ArcGIS Spatial data platform. To ensure availability of the data the exercise we are getting data from the ESRI Living Atlas of the World but the principles apply to other ESRI portals.
+
+### 2.2. ESRI Living Atlas of the World
+
+![ESRI Living Atlas](ESRILivingAtlasIcon.png){width="50"} The ArcGIS Living Atlas of the World is a collection of geographic information from around the globe that is hosted by ESRI. This includes spatial data layers, but also includes app and maps. The landing page for the atlas can be found [here](https://livingatlas.arcgis.com/en/home/), and the atlas is also available through the portals connection on ArcGIS Pro.
+
+In this example, we are going to find the look at active typhoons in the Indian ocean. This will be done by loading in the 'Recent Hurricanes, Cyclones and Typhoons' feature layer supported by ESRI. In the seach bar type "Recent Hurricane, Cyclones and Typhoons" and click on the feature. This should bring up the metadata page for the spatial data (see below)
+
+![*Figure 1. The Recent Hurricanes, Cyclones and Typhoons Page on the ESRI Living Atlas*](RecentHurricanceCyclones_LivingAtlas_page.png)
+
+To access this data layer you need to obtain the URL for this spatial data. This is contained under the URL section (highlighted in the figure) and can be copied to the clipboard. In this example the URL is **https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/Recent_Hurricanes_v1/FeatureServer**. You can use the MapViewer to get information about the feature layer. For example, this feature layer contains 3 layers: "Observered Position" which is a point layer; "Observed Track" which is a polyline; and "Observed Wind Swath" which is a polygon. You can also look at the attribute tables - the "Observed Position" has 15 columns, we are going to use "Storm Name" and "Intensity".
+
+## 3. Loading the spatial data into R using the 'arcgis' package
+
+### 3.1 Set up a FeatureServer Object
+
+The first step is to create a link to the spatial data object that you wish to load into R. To do so you create a **FeatureServer** object using the function *arc_open*.
+
+For feature servers that require authenication using this function you can also provide the authorization token via the function 'arc_token'. This is not needed for this example.
+
+```{r}
+#| label: create-FeatureServer object
+#| 
+#| echo: true
+
+# This code creates the FeatureServer object using the arcgis package command 'arc_open'
+
+# create a `FeatureServer` object
+featureUrl <- "https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/Recent_Hurricanes_v1/FeatureServer"
+featureServer <- arc_open(featureUrl)
+featureServer
+```
+
+Looking at the summary of the feature server object gives an idea of the layers available and their geometry.
+
+### 3.2. Extract the data using the 'get_layer' function
+
+The next stage is to extract the spatial data from the FeatureServer object using the function 'get_layer'. This returns the feature layer as a 'FeatureLayer' object.
+
+In this example we are going to extract the point positions for the storm called 'Djoungou' from the 'Observed Position' layer. So first we have to extract the "Observed Position" layer.
+
+```{r}
+#| label: Extract the spatial data from the feature server
+#| 
+#| echo: true
+
+# This code get the layer from the FeatureServer object - for ID see output of FeatureServer
+djoungou_flayer <- get_layer(featureServer, id = 0)
+djoungou_flayer
+```
+
+### 3.3. Create a table of the fields present
+
+To assist (and to use field operations programmatically) you can use the function 'list_fields' to get the column names of the attribute table.
+
+```{r}
+#| label: List the field names from the feature layer
+#| 
+#| echo: true
+
+# This code get the fields from the FeatureLayer object.
+obsPosition_field <- list_fields(djoungou_flayer)
+
+# Create a nice table to display
+kbl(obsPosition_field) %>% 
+   kable_material()
+```
+
+### 3.4. Extract the data from the feature layer using 'arc_select'
+
+The next stage is to query the layer using 'arc_select' to extract an sf object which can be used in spatial manipulations in R.
+
+Here we are extracting all the points that have the STORMNAME of Djoungou. Below is a table of these points.
+
+```{r}
+#| label: Extract the spatial data from the feature layer (subsetting data)
+#| 
+#| echo: true
+
+# This code sets up a query to extract the data from the FeatureLayer object.
+
+# These are the field (columns) that we want to keep
+retainedFields <- c("STORMNAME", "INTENSITY", "YEAR", "MONTH", "DAY", "HHMM")
+
+# This is the query to set up
+subsetQuery <- "STORMNAME = 'Djoungou'"
+
+# Run the query
+djoungou_points <- arc_select(
+  djoungou_flayer,
+  fields = retainedFields,
+  where = subsetQuery
+)
+
+# Show the attribute table for the point layer
+kbl(djoungou_points %>% st_drop_geometry()) %>% kable_material()
+```
+
+Here is a spatial plot of the intensity of the points.
+
+```{r}
+#| label: Plot of the point layer
+#| 
+#| echo: false
+# Code to plot the points
+plot(djoungou_points["INTENSITY"], main = "Spatial Plot of the Intensity of Storm Djoungou.")
+```
+
+*Figure 2. Spatial plot of the intensity of Storm Djoungou.*
+
+### 3.5. Extract all the data from the feature layer using 'arc_select'
+
+To extract all the data you simply do not supply the 'where' statement (or the 'fields' argument for all fields).
+
+```{r}
+#| label: Extract all the spatial data from the feature layer (not subsetting data)
+#| 
+#| echo: true
+
+# This code sets up a query to extract the data from the FeatureLayer object.
+
+# These are the field (columns) that we want to keep
+retainedFields <- c("STORMNAME", "INTENSITY", "YEAR", "MONTH", "DAY", "HHMM")
+
+# Run the query
+djoungou_all_points <- arc_select(
+  djoungou_flayer,
+  fields = retainedFields
+)
+
+# Code to plot all the points
+plot(djoungou_all_points["INTENSITY"], main = "Spatial Plot of the Intensity of Storm Djoungou.")
+```
+
+*Figure 3. Spatial plot of the intensity of all storms.*
+
+### 3.6. Creating an interactive map with the package 'leaflet'
+
+So this data just looks like points on a graph. We can use the package 'leaflet' to add some spatial dimension in a nice HTML widget.
+
+```{r, fig.cap='Figure 4. Interactive map of Storm Djoungou'}
+#| label: Plotting the data on a graph using leaflet for storm Djoungou.
+#| 
+#| echo: false
+
+# This code creates a leaflet map with the data plotted for the Djoungou hurricanes
+maxIntensity <- max(djoungou_points$INTENSITY)
+colPal <- colorNumeric(palette = "viridis", domain = djoungou_points$INTENSITY)
+leaflet::leaflet(data = djoungou_points, width = '600px' , height = '800px') %>%
+  setView(lat = -15, lng = 80, zoom = 3) %>%
+  addCircleMarkers(data = djoungou_points, 
+                   radius = ~(INTENSITY/maxIntensity) * 16, 
+                   color = ~colPal(INTENSITY),
+                   popup = ~paste0(STORMNAME, ' recorded at ', HHMM, " on ", DAY, "/", MONTH, "/", YEAR),
+                   opacity = 0.85,
+                   fill = TRUE,
+                   fillColor = ~colPal(INTENSITY)) %>%
+  addLegend(position = 'topright', pal = colPal, 
+            values = djoungou_points$INTENSITY,
+            title = 'Intensity') %>%
+  addProviderTiles("Esri.WorldImagery")
+
+```
+
+```{r, fig.cap='Figure 5. Interactive map of all storms'}
+#| label: Plotting the data on a graph using leaflet for all storms
+#| 
+#| echo: false
+
+# This code creates a leaflet map with the data plotted for all the hurricanes
+maxIntensity <- max(djoungou_all_points$INTENSITY)
+colPal <- colorNumeric(palette = "viridis", domain = djoungou_all_points$INTENSITY)
+leaflet::leaflet(data = djoungou_all_points, width = '600px' , height = '800px') %>%
+  setView(lat = -15, lng = 80, zoom = 3) %>%
+  addCircleMarkers(data = djoungou_all_points, 
+                   radius = ~(INTENSITY/maxIntensity) * 16, 
+                   color = ~colPal(INTENSITY),
+                   popup = ~paste0(HHMM, " on ", DAY, "/", MONTH, "/", YEAR),
+                   opacity = 0.85,
+                   fill = TRUE,
+                   fillColor = ~colPal(INTENSITY)) %>%
+  addLegend(position = 'topright', pal = colPal, 
+            values = djoungou_all_points$INTENSITY,
+            title = 'Intensity') %>%
+  addProviderTiles("Esri.WorldImagery")
+```
+
+## 4. Final Points
+
+We have shown here a simple example of extracting spatial data from an ArcGIS portal. We have used this example because it is freely available and therefore does not require authentication. However, a similar approach can be used to obtain data from any ArcGIS portal such as ArcGIS Online or ArcGIS Enterprise. See [R-ArcGIS Bridge](https://www.esri.com/en-us/arcgis/products/r-arcgis-bridge/get-started#rstudio-integration) for integration of ArcGIS with RStudio.
+
+Further information on importing, displaying, manipulation and saving spatial data can be found in packages such as *raster* and *terra* for raster data, and *sf* and *stars* for vector data.
